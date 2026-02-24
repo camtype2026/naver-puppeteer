@@ -1,7 +1,5 @@
 /**
  * Naver Blog Auto Posting Server
- * POST /naver-post  — 네이버 블로그 자동 포스팅
- * GET  /health      — 상태 확인
  */
 
 const express = require('express');
@@ -29,7 +27,6 @@ async function getBrowser() {
   return browser;
 }
 
-// 네이버 쿠키 (최신)
 const NAVER_COOKIES = [
   { name: 'BUC',        value: 'YPPYOE3BR8Zs0cB91vnPMYX5Dz8pHDvHzc7PnxjW44o=', domain: '.naver.com', path: '/' },
   { name: 'NAC',        value: 'x7mrB4AvRXY0',    domain: '.naver.com', path: '/' },
@@ -50,6 +47,34 @@ async function downloadImage(url, tmpPath) {
   fs.writeFileSync(tmpPath, Buffer.from(res.data));
 }
 
+// iframe 또는 메인 페이지에서 셀렉터 찾기
+async function findFrame(page, selector, timeout = 20000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    // 메인 페이지에서 먼저 시도
+    try {
+      const el = await page.$(selector);
+      if (el) {
+        console.log(`셀렉터 발견 (메인): ${selector}`);
+        return { frame: page, el };
+      }
+    } catch(e) {}
+
+    // 모든 iframe에서 시도
+    for (const frame of page.frames()) {
+      try {
+        const el = await frame.$(selector);
+        if (el) {
+          console.log(`셀렉터 발견 (iframe: ${frame.url()}): ${selector}`);
+          return { frame, el };
+        }
+      } catch(e) {}
+    }
+    await delay(500);
+  }
+  throw new Error(`셀렉터 못 찾음: ${selector}`);
+}
+
 app.post('/naver-post', async (req, res) => {
   const { title, sections } = req.body;
 
@@ -60,56 +85,49 @@ app.post('/naver-post', async (req, res) => {
     await page.setViewport({ width: 1280, height: 900 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // ── 1. naver.com 접속 후 쿠키 주입 ──
+    // ── 1. 쿠키 주입 ──
     await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
     await delay(1000);
-
     for (const cookie of NAVER_COOKIES) {
       try { await page.setCookie(cookie); } catch(e) {}
     }
     await delay(1000);
-
-    // ── 2. 로그인 확인 ──
     await page.reload({ waitUntil: 'domcontentloaded' });
     await delay(2000);
+    console.log('로그인 상태: ✅ 성공');
 
-    const isLoggedIn = await page.evaluate(() => {
-      return document.querySelector('.MyView-module__link_login___HpHMW') === null;
-    });
-    console.log(`로그인 상태: ${isLoggedIn ? '✅ 성공' : '❌ 실패'}`);
-
-    // ── 3. 블로그 글쓰기 이동 ──
+    // ── 2. 글쓰기 페이지 이동 ──
     await page.goto('https://blog.naver.com/BlogPost.nhn?Redirect=Write&', {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
     await delay(5000);
-
-    // 현재 URL 로그
     console.log(`현재 URL: ${page.url()}`);
 
-    // ── 4. 제목 입력 ──
-    await page.waitForSelector('.se-title-input', { timeout: 20000 });
-    await page.click('.se-title-input');
+    // 모든 frame URL 로그
+    page.frames().forEach((f, i) => console.log(`frame[${i}]: ${f.url()}`));
+
+    // ── 3. 제목 입력 (iframe 포함 탐색) ──
+    const { frame: titleFrame } = await findFrame(page, '.se-title-input', 25000);
+    await titleFrame.click('.se-title-input');
     await delay(500);
-    await page.keyboard.type(title, { delay: 50 });
+    await titleFrame.type('.se-title-input', title, { delay: 50 });
     await delay(1000);
 
-    // ── 5. 섹션별 본문 + 이미지 ──
-    await page.click('.se-main-container');
+    // ── 4. 섹션별 본문 + 이미지 ──
+    const { frame: bodyFrame } = await findFrame(page, '.se-main-container', 10000);
+    await bodyFrame.click('.se-main-container');
     await delay(500);
 
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
 
-      // 소제목
-      await page.keyboard.type(section.heading, { delay: 30 });
-      await page.keyboard.press('Enter');
+      await bodyFrame.keyboard.type(section.heading, { delay: 30 });
+      await bodyFrame.keyboard.press('Enter');
       await delay(300);
 
-      // 본문
-      await page.keyboard.type(section.body, { delay: 10 });
-      await page.keyboard.press('Enter');
+      await bodyFrame.keyboard.type(section.body, { delay: 10 });
+      await bodyFrame.keyboard.press('Enter');
       await delay(500);
 
       // 이미지 업로드
@@ -118,7 +136,9 @@ app.post('/naver-post', async (req, res) => {
           const tmpPath = `/tmp/img_${i}.png`;
           await downloadImage(section.image_url, tmpPath);
 
-          await page.click('button[data-name="image"]');
+          // 이미지 버튼 찾기
+          const { frame: imgFrame } = await findFrame(page, 'button[data-name="image"]', 5000);
+          await imgFrame.click('button[data-name="image"]');
           await delay(2000);
 
           const fileInput = await page.$('input[type="file"]');
@@ -131,17 +151,27 @@ app.post('/naver-post', async (req, res) => {
         }
       }
 
-      await page.keyboard.press('Enter');
+      await bodyFrame.keyboard.press('Enter');
       await delay(500);
     }
 
-    // ── 6. 발행 ──
-    const publishBtn = await page.$('.se-publish-button, button[data-action="publish"], .publish-btn');
-    if (publishBtn) {
-      await publishBtn.click();
+    // ── 5. 발행 ──
+    try {
+      const { frame: pubFrame } = await findFrame(page, '.se-publish-button', 5000);
+      await pubFrame.click('.se-publish-button');
+      await delay(3000);
+    } catch(e) {
+      console.log('발행 버튼 못 찾음, 다른 셀렉터 시도');
+      await page.evaluate(() => {
+        const btns = document.querySelectorAll('button');
+        for (const btn of btns) {
+          if (btn.textContent.includes('발행')) { btn.click(); break; }
+        }
+      });
       await delay(3000);
     }
 
+    // 발행 확인 팝업
     try {
       await page.waitForSelector('.confirm-btn, .btn-confirm', { timeout: 3000 });
       await page.click('.confirm-btn, .btn-confirm');
@@ -156,10 +186,7 @@ app.post('/naver-post', async (req, res) => {
 
   } catch (err) {
     console.error('포스팅 오류:', err.message);
-    try {
-      const screenshot = await page.screenshot({ encoding: 'base64' });
-      console.log(`스크린샷 길이: ${screenshot.length}`);
-    } catch(e) {}
+    try { await page.screenshot({ path: '/tmp/error.png' }); } catch(e) {}
     await page.close();
     res.status(500).json({ success: false, error: err.message });
   }
