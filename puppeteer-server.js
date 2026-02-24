@@ -154,7 +154,7 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(3000, () => {
+app.listen(PORT, () => {
   console.log('🚀 Naver Blog Puppeteer Server :3000');
   console.log('   POST /naver-post');
   console.log('   GET  /health');
