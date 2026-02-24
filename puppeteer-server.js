@@ -86,7 +86,7 @@ app.post('/naver-post', async (req, res) => {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     // ── 1. 쿠키 주입 ──
-    await page.goto('https://www.naver.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto('https://blog.naver.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
     await delay(1000);
     for (const cookie of NAVER_COOKIES) {
       try { await page.setCookie(cookie); } catch(e) {}
