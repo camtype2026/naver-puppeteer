@@ -97,7 +97,7 @@ app.post('/naver-post', async (req, res) => {
     console.log('로그인 상태: ✅ 성공');
 
     // ── 2. 글쓰기 페이지 이동 ──
-    await page.goto('https://blog.naver.com/BlogPost.nhn?Redirect=Write&', {
+    await page.goto('https://blog.naver.com/giocall?Redirect=Write&', {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
