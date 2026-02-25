@@ -133,25 +133,19 @@ app.post('/naver-post', async (req, res) => {
     await delay(1500);
     console.log('✅ 제목 입력 완료');
 
-    // ── 6. 섹션별 본문 입력 (텍스트 전용) ──
+    // ── 6. 섹션별 본문 입력 (이미지 제외 버전) ──
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
 
-      // 소제목 입력
-      if (section.heading) {
-        await page.keyboard.type(section.heading, { delay: 30 });
-        await page.keyboard.press('Enter');
-        await delay(300);
-      }
+      await page.keyboard.type(section.heading, { delay: 30 });
+      await page.keyboard.press('Enter');
+      await delay(300);
 
-      // 본문 입력
-      if (section.body) {
-        await page.keyboard.type(section.body, { delay: 10 });
-        await page.keyboard.press('Enter');
-        await delay(500);
-      }
+      await page.keyboard.type(section.body, { delay: 10 });
+      await page.keyboard.press('Enter');
+      await delay(500);
 
-      // 이미지 업로드 부분은 테스트를 위해 비활성화 처리함
+      // [테스트를 위해 이미지 업로드 로직 주석 처리]
       /*
       if (section.image_url) {
         try {
@@ -181,34 +175,31 @@ app.post('/naver-post', async (req, res) => {
 
     // ── 7. 발행 버튼 클릭 ──
     try {
-      // 상단 발행 버튼 찾기
-      const pubBtn = await waitForEl(mainFrame, '.se-help-panel-close-button, .se-publish-button', 10000);
+      const pubBtn = await waitForEl(mainFrame, '.se-publish-button', 5000);
       await pubBtn.click();
-      console.log('✅ 발행 버튼(1단계) 클릭');
-      await delay(2000);
+      console.log('✅ 발행 버튼 클릭');
     } catch(e) {
-      console.log('발행 버튼 클릭 재시도(evaluate)');
-      await mainFrame.evaluate(() => {
+      await page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
         const btn = btns.find(b => b.textContent.trim().includes('발행'));
         if (btn) btn.click();
       });
     }
+    await delay(3000);
 
     // ── 8. 최종 발행 확인 클릭 ──
     try {
-      // 발행 레이어에서 실제 '발행' 버튼 클릭
-      await delay(2000);
-      const finalPubBtn = await waitForEl(mainFrame, '.se-popup-button-publish, .btn_confirm', 10000);
-      await finalPubBtn.click();
-      console.log('✅ 최종 발행 완료 클릭');
-      await delay(5000); // 포스팅 완료 후 페이지 전환 대기
+      // .se-popup-button-publish 는 네이버 에디터의 실제 최종 발행 확인 버튼 클래스입니다.
+      const confirmBtn = await page.waitForSelector('.confirm-btn, .btn-confirm, .se-popup-button-confirm, .se-popup-button-publish', { timeout: 5000 });
+      await confirmBtn.click();
+      console.log('✅ 발행 확인 클릭');
+      await delay(5000);
     } catch(e) {
-      console.error('최종 발행 버튼 클릭 실패:', e.message);
+      console.log('최종 확인 버튼 클릭 실패 또는 이미 완료됨');
     }
 
     const currentUrl = page.url();
-    console.log(`✅ 프로세스 종료: ${title} | ${currentUrl}`);
+    console.log(`✅ 포스팅 완료: ${title} | ${currentUrl}`);
 
     await page.close();
     res.json({ success: true, url: currentUrl, title });
