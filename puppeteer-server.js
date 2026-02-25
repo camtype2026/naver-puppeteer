@@ -1,7 +1,5 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
-const axios = require('axios');
-const fs = require('fs');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
@@ -28,11 +26,6 @@ async function getBrowser() {
 
 async function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
-}
-
-async function downloadImage(url, tmpPath) {
-  const res = await axios.get(url, { responseType: 'arraybuffer' });
-  fs.writeFileSync(tmpPath, Buffer.from(res.data));
 }
 
 async function naverLogin(page) {
@@ -105,7 +98,7 @@ app.post('/naver-post', async (req, res) => {
     await delay(4000);
     console.log(`글쓰기 URL: ${page.url()}`);
 
-    // ── 3. 작성중인 글 팝업 처리 ──
+    // ── 3. 팝업 처리 (취소 클릭) ──
     try {
       const frames = page.frames();
       for (const frame of frames) {
@@ -119,7 +112,7 @@ app.post('/naver-post', async (req, res) => {
       }
     } catch(e) {}
 
-    // ── 4. mainFrame 접근 ──
+    // ── 4. mainFrame ──
     const mainFrame = await getMainFrame(page);
     await delay(3000);
 
@@ -133,7 +126,7 @@ app.post('/naver-post', async (req, res) => {
     await delay(1500);
     console.log('✅ 제목 입력 완료');
 
-    // ── 6. 섹션별 본문 입력 (이미지 제외 버전) ──
+    // ── 6. 본문 입력 (텍스트만) ──
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
 
@@ -145,35 +138,10 @@ app.post('/naver-post', async (req, res) => {
       await page.keyboard.press('Enter');
       await delay(500);
 
-      // [테스트를 위해 이미지 업로드 로직 주석 처리]
-      /*
-      if (section.image_url) {
-        try {
-          const tmpPath = `/tmp/img_${i}.png`;
-          await downloadImage(section.image_url, tmpPath);
-
-          const imgBtn = await waitForEl(mainFrame, 'button[data-name="image"]', 5000);
-          await imgBtn.click();
-          await delay(2000);
-
-          const fileInput = await page.$('input[type="file"]') ||
-                            await mainFrame.$('input[type="file"]');
-          if (fileInput) {
-            await fileInput.uploadFile(tmpPath);
-            await delay(4000);
-          }
-          console.log(`✅ 섹션${i+1} 이미지 완료`);
-        } catch (imgErr) {
-          console.error(`이미지 오류 (섹션${i+1}):`, imgErr.message);
-        }
-      }
-      */
-
-      await page.keyboard.press('Enter');
-      await delay(500);
+      console.log(`✅ 섹션${i+1} 텍스트 입력 완료`);
     }
 
-    // ── 7. 발행 버튼 클릭 ──
+    // ── 7. 발행 ──
     try {
       const pubBtn = await waitForEl(mainFrame, '.se-publish-button', 5000);
       await pubBtn.click();
@@ -187,16 +155,12 @@ app.post('/naver-post', async (req, res) => {
     }
     await delay(3000);
 
-    // ── 8. 최종 발행 확인 클릭 ──
     try {
-      // .se-popup-button-publish 는 네이버 에디터의 실제 최종 발행 확인 버튼 클래스입니다.
-      const confirmBtn = await page.waitForSelector('.confirm-btn, .btn-confirm, .se-popup-button-confirm, .se-popup-button-publish', { timeout: 5000 });
+      const confirmBtn = await page.waitForSelector('.confirm-btn, .btn-confirm, .se-popup-button-confirm', { timeout: 5000 });
       await confirmBtn.click();
       console.log('✅ 발행 확인 클릭');
-      await delay(5000);
-    } catch(e) {
-      console.log('최종 확인 버튼 클릭 실패 또는 이미 완료됨');
-    }
+      await delay(3000);
+    } catch(e) {}
 
     const currentUrl = page.url();
     console.log(`✅ 포스팅 완료: ${title} | ${currentUrl}`);
@@ -206,7 +170,7 @@ app.post('/naver-post', async (req, res) => {
 
   } catch (err) {
     console.error('포스팅 오류:', err.message);
-    if (page) await page.close();
+    await page.close();
     res.status(500).json({ success: false, error: err.message });
   }
 });
